@@ -1,0 +1,4 @@
+// Ignore the compiled output files
+*.out
+// Ignore the debug symbol directories
+*.out.dSYM/

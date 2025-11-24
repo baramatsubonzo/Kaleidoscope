@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 // If the lexer reads a character that is not a number, not a keword, and not an identifier,
 // it simply returns the ASCII value of that character (0-255).
@@ -24,7 +25,7 @@ static double NumVal;
 static int gettok() {
   static int LastChar = ' ';
   // Skip any whitespace.
-  while (isspace(Lastchar))
+  while (isspace(LastChar))
     LastChar = getchar();
 
   if (isalpha(LastChar)) { // The initial character must be a letter(A-Z, a-z). e.g., "1def" is prohibited.a
@@ -65,4 +66,58 @@ static int gettok() {
   int ThisChar = LastChar;
   LastChar = getchar();
   return ThisChar;
+}
+// Base class for all expression nodes.
+class ExprAST {
+  public:
+  virtual ~ExprAST() = default; // virtual destructor for base class
+};
+
+class NumberExprAST : public ExprAST {
+  double Val;
+public:
+  NumberExprAST(double Val) : Val(Val) {} // constructor
+};
+
+class VariableExprAST : public ExprAST {
+  std::string Name;
+public:
+  VariableExprAST(const std::string &Name) : Name(Name) {}
+};
+
+class BinaryExprAST : public ExprAST {
+  char Op; // operator
+  std::unique_ptr<ExprAST> LHS, RHS; // smart pointers can only have one owner
+  public:
+  BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
+    : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {} // std::move allows transfer of ownership
+};
+
+class CallExprAST : public ExprAST {
+  std::string Callee;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+public:
+  CallExprAST(const std::string &Callee, std::vector<std::unique_ptr<ExprAST>> Args)
+    : Callee(Callee), Args(std::move(Args)) {}
+};
+
+class PrototypeAST {
+  std::string Name;
+  std::vector<std::string> Args;
+public:
+  PrototypeAST(const std::string &Name, std::vector<std::string> Args)
+    : Name(Name), Args(std::move(Args)) {}
+  const std::string &getName() const { return Name; }
+};
+
+class FunctionAST {
+  std::unique_ptr<PrototypeAST> Proto;
+  std::unique_ptr<ExprAST> Body;
+public:
+  FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::unique_ptr<ExprAST> Body)
+    : Proto(std::move(Proto)), Body(std::move(Body)) {}
+};
+
+int main() {
+  return 0;
 }
