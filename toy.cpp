@@ -118,6 +118,23 @@ public:
     : Proto(std::move(Proto)), Body(std::move(Body)) {}
 };
 
+// Provide a simple token buffer.
+// CurTok is the current token the parser is looking at.
+// getNextToken reads another token from the lexer and updates CurTok with its results.
+static int CurTok;
+static int getNextToken() {
+  return CurTok = gettok();
+}
+
+std::unique_ptr<ExprAST> LogError(const char *Str) {
+  fprintf(stderr, "Error: %s\n", Str);
+  return nullptr;
+}
+std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
+
 int main() {
   return 0;
 }
