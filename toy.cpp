@@ -1,3 +1,15 @@
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Verifier.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -6,7 +18,11 @@
 #include <map>
 #include <memory>
 
+using namespace llvm;
 
+//===
+// Lexer
+//===
 // If the lexer reads a character that is not a number, not a keword, and not an identifier,
 // it simply returns the ASCII value of that character (0-255).
 // If the lexer reads something meaningful,
@@ -70,7 +86,12 @@ static int gettok() {
   LastChar = getchar();
   return ThisChar;
 }
+
+//===
+// Abstract Syntax Tree (AST)
+//===
 // Base class for all expression nodes.
+namespace {
 class ExprAST {
   public:
   virtual ~ExprAST() = default; // virtual destructor for base class
@@ -84,72 +105,11 @@ public:
   Value *codegen() override;
 };
 
-Value *NumberExprAST::codegen() {
-  return ConstantFP::get(*TheContext, APFloat(Val));
-}
-
-Value *VariableExprAST::codegen() {
-  Value *V = NamedValues[Name];
-  if (!V)
-    LogErrorV("Unknown variable name");
-  return V;
-}
-
-Value *BinaryExprAST::codegen() {
-  Value *L = LHS->codegen();
-  Value *R = RHS->codegen();
-  if (!L || !R)
-    return nullptr;
-
-  switch (Op) {
-  case '+':
-    return Builder->CreateFAdd(L, R, "addtmp");
-  case '-':
-    return Builder->CreateFSub(L, R, "subtmp");
-  case '*':
-    return Builder->CreateFMul(L, R, "multmp");
-  case '<':
-    L = Builder->CreateFCmpULT(L, R, "cmptmp");
-    // Convert bool 0/1 to double 0.0 or 1.0
-    return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
-
-  default:
-    return LogErrorV("invalid binary operator");
-  }
-}
-
-Value *CallExprAST::codegen() {
-  Function *CalleeF = TheModule->getFunction(Callee);
-  if (!CalleeF)
-    return LogErrorV("Unknown function referenced");
-  if (CalleeF->arg_size() != Args.size())
-    return LogErrorV("Incorrect # arguments passed");
-
-  std::vector<Value *> ArgsV;
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen());
-    if (!ArgsV.back())
-      return nullptr;
-  }
-
-  return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
-}
-
-Function *PrototypeAST::codegen() {
-  std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
-  FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
-  FunctionAST *F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
-
-  unsigned Idx = 0;
-  for (auto &Arg : F->args())
-    Arg.setName(Args[idx++]);
-  return F;
-}
-
 class VariableExprAST : public ExprAST {
   std::string Name;
 public:
   VariableExprAST(const std::string &Name) : Name(Name) {}
+  Value *codegen() override;
 };
 
 class BinaryExprAST : public ExprAST {
@@ -158,6 +118,7 @@ class BinaryExprAST : public ExprAST {
   public:
   BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS)
     : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {} // std::move allows transfer of ownership
+  Value *codegen() override;
 };
 
 class CallExprAST : public ExprAST {
@@ -166,6 +127,7 @@ class CallExprAST : public ExprAST {
 public:
   CallExprAST(const std::string &Callee, std::vector<std::unique_ptr<ExprAST>> Args)
     : Callee(Callee), Args(std::move(Args)) {}
+  Value *codegen() override;
 };
 
 class PrototypeAST {
@@ -174,6 +136,8 @@ class PrototypeAST {
 public:
   PrototypeAST(const std::string &Name, std::vector<std::string> Args)
     : Name(Name), Args(std::move(Args)) {}
+
+  Function *codegen();
   const std::string &getName() const { return Name; }
 };
 
@@ -183,14 +147,27 @@ class FunctionAST {
 public:
   FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::unique_ptr<ExprAST> Body)
     : Proto(std::move(Proto)), Body(std::move(Body)) {}
-};
 
+  Function *codegen();
+};
+} // end anonymous namespace
+
+//===
+// Parser
+//===
 // Provide a simple token buffer.
 // CurTok is the current token the parser is looking at.
 // getNextToken reads another token from the lexer and updates CurTok with its results.
 static int CurTok;
-static int getNextToken() {
-  return CurTok = gettok();
+static int getNextToken() { return CurTok = gettok();}
+static std::map<char, int> BinopPrecedence;
+static int GetTokPrecedence() {
+  if (!isascii(CurTok))
+    return -1;
+
+    int TokPrec = BinopPrecedence[CurTok];
+    if (TokPrec <= 0) return -1;
+    return TokPrec;
 }
 
 std::unique_ptr<ExprAST> LogError(const char *Str) {
@@ -199,16 +176,6 @@ std::unique_ptr<ExprAST> LogError(const char *Str) {
 }
 
 std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
-  LogError(Str);
-  return nullptr;
-}
-
-static std::unique_ptr<LLVMContext> TheContext;
-static std::unique_ptr<IRBuilder<>> Builder; // helper object to create LLVM instructions
-static std::unique_ptr<Module> TheModule;
-static std::map<std::string, Value *> NameValues;
-
-Value *LogErrorV(const char *Str) {
   LogError(Str);
   return nullptr;
 }
@@ -274,17 +241,6 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     case '(':
       return ParseParenExpr();
   }
-}
-
-static std::map<char, int> BinopPrecedence;
-
-static int GetTokPrecedence() {
-  if (!isascii(CurTok))
-    return -1;
-
-    int TokPrec = BinopPrecedence[CurTok];
-    if (TokPrec <= 0) return -1;
-    return TokPrec;
 }
 
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS) {
@@ -360,6 +316,109 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
     return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
   }
   return nullptr;
+}
+
+//===
+// Code Generation
+//===
+static std::unique_ptr<LLVMContext> TheContext;
+static std::unique_ptr<IRBuilder<>> Builder; // helper object to create LLVM instructions
+static std::unique_ptr<Module> TheModule;
+static std::map<std::string, Value *> NamedValues;
+
+Value *LogErrorV(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
+
+Value *NumberExprAST::codegen() {
+  return ConstantFP::get(*TheContext, APFloat(Val));
+}
+
+Value *VariableExprAST::codegen() {
+  Value *V = NamedValues[Name];
+  if (!V)
+    LogErrorV("Unknown variable name");
+  return V;
+}
+
+Value *BinaryExprAST::codegen() {
+  Value *L = LHS->codegen();
+  Value *R = RHS->codegen();
+  if (!L || !R)
+    return nullptr;
+
+  switch (Op) {
+  case '+':
+    return Builder->CreateFAdd(L, R, "addtmp");
+  case '-':
+    return Builder->CreateFSub(L, R, "subtmp");
+  case '*':
+    return Builder->CreateFMul(L, R, "multmp");
+  case '<':
+    L = Builder->CreateFCmpULT(L, R, "cmptmp");
+    // Convert bool 0/1 to double 0.0 or 1.0
+    return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
+
+  default:
+    return LogErrorV("invalid binary operator");
+  }
+}
+
+Value *CallExprAST::codegen() {
+  Function *CalleeF = TheModule->getFunction(Callee);
+  if (!CalleeF)
+    return LogErrorV("Unknown function referenced");
+  if (CalleeF->arg_size() != Args.size())
+    return LogErrorV("Incorrect # arguments passed");
+
+  std::vector<Value *> ArgsV;
+  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+    ArgsV.push_back(Args[i]->codegen());
+    if (!ArgsV.back())
+      return nullptr;
+  }
+
+  return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+Function *PrototypeAST::codegen() {
+  std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
+  FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+
+  unsigned Idx = 0;
+  for (auto &Arg : F->args())
+    Arg.setName(Args[Idx++]);
+  return F;
+}
+
+Function *FunctionAST::codegen() {
+  // First, check for existing function from a previous 'extern' declaration.
+  Function *TheFunction = TheModule->getFunction(Proto->getName());
+
+  if (!TheFunction)
+    TheFunction = Proto->codegen();
+  if (!TheFunction)
+    return nullptr;
+  if (!TheFunction->empty())
+    return (Function*)LogErrorV("Function cannot be redefined.");
+
+  BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
+  Builder->SetInsertPoint(BB);
+
+  NamedValues.clear();
+  for (auto &Arg : TheFunction->args())
+    NamedValues[std::string(Arg.getName())] = &Arg;
+
+  if (Value *RetVal = Body->codegen()) {
+    Builder->CreateRet(RetVal);
+    verifyFunction(*TheFunction);
+    return TheFunction;
+
+    TheFunction->eraseFromParent();
+    return nullptr;
+  }
 }
 
 static void HandleDefinition() {
