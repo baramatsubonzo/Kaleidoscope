@@ -74,12 +74,14 @@ static int gettok() {
 class ExprAST {
   public:
   virtual ~ExprAST() = default; // virtual destructor for base class
+  virtual Value *codegen() = 0;
 };
 
 class NumberExprAST : public ExprAST {
   double Val;
 public:
   NumberExprAST(double Val) : Val(Val) {} // constructor
+  Value *codegen() override;
 };
 
 class VariableExprAST : public ExprAST {
@@ -135,6 +137,16 @@ std::unique_ptr<ExprAST> LogError(const char *Str) {
 }
 
 std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
+
+static std::unique_ptr<LLVMContext> TheContext;
+static std::unique_ptr<IRBuilder<>> Builder; // helper object to create LLVM instructions
+static std::unique_ptr<Module> TheModule;
+static std::map<std::string, Value *> NameValues;
+
+Value *LogErrorV(const char *Str) {
   LogError(Str);
   return nullptr;
 }
@@ -334,7 +346,6 @@ static void MainLoop() {
     }
   }
 }
-
 
 int main() {
   BinopPrecedence['<'] = 10;
