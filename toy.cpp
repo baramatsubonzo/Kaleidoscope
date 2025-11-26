@@ -135,6 +135,17 @@ Value *CallExprAST::codegen() {
   return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
 }
 
+Function *PrototypeAST::codegen() {
+  std::vector<Type*> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
+  FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+  FunctionAST *F = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+
+  unsigned Idx = 0;
+  for (auto &Arg : F->args())
+    Arg.setName(Args[idx++]);
+  return F;
+}
+
 class VariableExprAST : public ExprAST {
   std::string Name;
 public:
