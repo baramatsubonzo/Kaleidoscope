@@ -2,3 +2,6 @@
 *.out
 // Ignore the debug symbol directories
 *.out.dSYM/
+
+// Ignore the vscode settings folder
+.vscode/
