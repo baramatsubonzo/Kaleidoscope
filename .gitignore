@@ -5,3 +5,7 @@
 
 // Ignore the vscode settings folder
 .vscode/
+
+// Ignore the compiled binary for
+toy
+toy.dSYM/
