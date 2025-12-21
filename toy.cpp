@@ -53,6 +53,8 @@ enum Token {
   tok_if = -6,
   tok_then = -7,
   tok_else = -8,
+  tok_for = -9,
+  tok_in = -10
 };
 
 static std::string IdentifierStr;
@@ -80,6 +82,10 @@ static int gettok() {
       return tok_then;
     if (IdentifierStr == "else")
       return tok_else;
+    if (IdentifierStr == "for")
+      return tok_for;
+    if (IdentifierStr == "in")
+      return tok_in;
     return tok_identifier;
   }
 
@@ -160,6 +166,18 @@ public:
   IfExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
             std::unique_ptr<ExprAST> Else)
     : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+  Value *codegen() override;
+};
+
+class ForExprAST : public ExprAST {
+  std::string VarName;
+  std::unique_ptr<ExprAST> Start, End, Step, Body;
+public:
+  ForExprAST(const std::string &VarName, std::unique_ptr<ExprAST> Start,
+             std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
+             std::unique_ptr<ExprAST> Body)
+    : VarName(VarName), Start(std::move(Start)), End(std::move(End)),
+      Step(std::move(Step)), Body(std::move(Body)) {}
   Value *codegen() override;
 };
 
