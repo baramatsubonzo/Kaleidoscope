@@ -293,6 +293,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       return ParseParenExpr();
     case tok_if:
       return ParseIfExpr();
+    case tok_for:
+      return ParseForExpr();
   }
 }
 
@@ -351,6 +353,51 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
   return std::make_unique<IfExprAST>(std::move(Cond), std::move(Then),
                                      std::move(Else));
+}
+
+static std::unique_ptr<ExprAST> ParseForExpr() {
+  getNextToken();
+
+  if (CurTok != tok_identifier)
+    return LogError("expected identifier after for");
+
+  std::string IdName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '=')
+    return LogError("expected '=' after for");
+  getNextToken();
+
+  auto Start = ParseExpression();
+  if (!Start)
+    return nullptr;
+
+  if (CurTok != ',')
+    return LogError("expected ',' after for start value");
+  getNextToken();
+
+  auto End = ParseExpression();
+  if (!End)
+    return nullptr;
+
+  std::unique_ptr<ExprAST> Step;
+  if (CurTok == ',') {
+    getNextToken();
+    Step = ParseExpression();
+    if (!Step)
+      return nullptr;
+  }
+
+  if (CurTok != tok_in)
+    return LogError("expected 'in' after for");
+  getNextToken();
+
+  auto Body = ParseExpression();
+  if (!Body)
+    return nullptr;
+
+  return std::make_unique<ForExprAST>(IdName, std::move(Start), std::move(End),
+                                      std::move(Step), std::move(Body));
 }
 
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
