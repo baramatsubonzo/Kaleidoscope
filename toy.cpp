@@ -158,6 +158,15 @@ class BinaryExprAST : public ExprAST {
   Value *codegen() override;
 };
 
+class UnaryExprAST : public ExprAST {
+  char Opcode;
+  std::unique_ptr<ExprAST> Operand;
+public:
+  UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
+    : Opcode(Opcode), Operand(std::move(Operand)) {}
+  Value *codegen() override;
+};
+
 class CallExprAST : public ExprAST {
   std::string Callee;
   std::vector<std::unique_ptr<ExprAST>> Args;
@@ -320,6 +329,17 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
 }
 
+static std::unique_ptr<ExprAST> ParseUnary() {
+  if (!isascii(CurTok) || CurTok == '(' || CurTok == ',')
+    return ParsePrimary();
+
+  int Opc = CurTok;
+  getNextToken();
+  if (auto Operand = ParseUnary())
+    return std::make_unique<UnaryExprAST>(Opc, std::move(Operand));
+  return nullptr;
+}
+
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS) {
   while (true) {
     int TokPrec = GetTokPrecedence();
@@ -334,11 +354,11 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<Expr
     if (!RHS)
       return nullptr;
 
-      int NextPrec = GetTokPrecedence();
-      if (TokPrec < NextPrec) {
-        RHS = ParseBinOpRHS(TokPrec+1, std::move(RHS));
-        if (!RHS)
-          return nullptr;
+    int NextPrec = GetTokPrecedence();
+    if (TokPrec < NextPrec) {
+      RHS = ParseBinOpRHS(TokPrec+1, std::move(RHS));
+      if (!RHS)
+        return nullptr;
     }
 
     LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
@@ -433,6 +453,15 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     case tok_identifier:
       FnName = IdentifierStr;
       Kind = 0;
+      getNextToken();
+      break;
+    case tok_unary:
+      getNextToken();
+      if (!isascii(CurTok))
+        return LogErrorP("Expected unary operator");
+      FnName = "unary";
+      FnName += (char)CurTok;
+      Kind = 1;
       getNextToken();
       break;
     case tok_binary:
@@ -534,6 +563,18 @@ Value *VariableExprAST::codegen() {
   if (!V)
     LogErrorV("Unknown variable name");
   return V;
+}
+
+Value *UnaryExprAST::codegen() {
+  Value *OperandV = Operand->codegen();
+  if (!OperandV)
+    return nullptr;
+
+  Function *F = getFunction(std::string("unary") + Opcode);
+  if (!F)
+    return LogErrorV("Unknown unary operator");
+
+  return Builder->CreateCall(F, OperandV, "unop");
 }
 
 Value *BinaryExprAST::codegen() {
@@ -834,6 +875,10 @@ extern "C" DLLEXPORT double putchard(double X) {
 }
 
 int main() {
+  InitializeNativeTarget();
+  InitializeNativeTargetAsmPrinter();
+  InitializeNativeTargetAsmParser();
+
   BinopPrecedence['<'] = 10;
   BinopPrecedence['+'] = 20;
   BinopPrecedence['-'] = 20;
@@ -842,7 +887,8 @@ int main() {
   fprintf(stderr, "ready> ");
   getNextToken();
 
-TheJIT = ExitOnErr(KaleidoscopeJIT::Create());
+  TheJIT = ExitOnErr(KaleidoscopeJIT::Create());
+  InitializeModuleAndManagers();
 
   MainLoop();
   return 0;
