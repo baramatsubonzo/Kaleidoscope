@@ -514,7 +514,7 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 
 static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
   if (auto E = ParseExpression()) {
-    auto Proto = std::make_unique<PrototypeAST>("", std::vector<std::string>());
+    auto Proto = std::make_unique<PrototypeAST>("__anon_expr", std::vector<std::string>());
     return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
   }
   return nullptr;
@@ -790,17 +790,13 @@ static void HandleDefinition() {
       fprintf(stderr, "Read function definition:");
       FnIR->print(errs());
       fprintf(stderr, "\n");
-      ExitOnErr(TheJIT->addModule(ThreadSafeModule(std::move(TheModule), std::move(TheContext))));
+      ExitOnErr(TheJIT->addModule(
+        ThreadSafeModule(std::move(TheModule), std::move(TheContext))));
       InitializeModuleAndManagers();
     }
     else {
       getNextToken();
     }
-  }
-  if (ParseDefinition()) {
-    fprintf(stderr, "Parsed a function definition\n");
-  } else {
-    getNextToken();
   }
 }
 
@@ -871,6 +867,10 @@ static void MainLoop() {
 
 extern "C" DLLEXPORT double putchard(double X) {
   fputc((char)X, stderr);
+  return 0;
+}
+extern "C" DLLEXPORT double printd(double X) {
+  fprintf(stderr, "%f\n", X);
   return 0;
 }
 
