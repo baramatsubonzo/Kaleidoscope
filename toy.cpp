@@ -37,35 +37,11 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/IR/LegacyPassManager.h"
 
+#include "token.h"
+
 using namespace llvm;
 using namespace llvm::orc;
 
-//===
-// Lexer
-//===
-// If the lexer reads a character that is not a number, not a keword, and not an identifier,
-// it simply returns the ASCII value of that character (0-255).
-// If the lexer reads something meaningful,
-// it returns one of the special token values defined here.
-enum Token {
-  tok_eof = -1, // end of file
-
-  tok_def = -2,
-  tok_extern = -3,
-
-  tok_identifier = -4, // variable names
-  tok_number = -5, // numeric literals
-
-  tok_if = -6,
-  tok_then = -7,
-  tok_else = -8,
-  tok_for = -9,
-  tok_in = -10,
-
-  tok_binary = -11,
-  tok_unary = -12,
-  tok_var = -13
-};
 
 static std::string IdentifierStr;
 static double NumVal;
