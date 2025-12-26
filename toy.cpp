@@ -525,6 +525,7 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
 //===
 static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<IRBuilder<>> Builder; // helper object to create LLVM instructions
+static std::map<std::string, AllocaInst *> NamedValues;
 static std::unique_ptr<Module> TheModule;
 static std::map<std::string, Value *> NamedValues;
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
@@ -554,15 +555,23 @@ Function *getFunction(std::string Name) {
   return nullptr;
 }
 
+static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction, StringRef VarName) {
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(Type::getDoubleTy(*TheContext), nullptr, VarName);
+}
+
 Value *NumberExprAST::codegen() {
   return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
 Value *VariableExprAST::codegen() {
-  Value *V = NamedValues[Name];
-  if (!V)
+  // Look this variable up in the function.
+  AllocaInst *A = NamedValues[Name];
+  if (!A)
     LogErrorV("Unknown variable name");
-  return V;
+  // Load the value.
+  return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
 }
 
 Value *UnaryExprAST::codegen() {
@@ -663,10 +672,16 @@ Value *IfExprAST::codegen() {
 }
 
 Value *ForExprAST::codegen() {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  // Create an alloca for the variable in the entry block.
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
+  // Emit the start code first, without 'variable' in scope.
   Value *StartVal = Start->codegen();
   if (!StartVal)
     return nullptr;
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  // Store the value into the alloca.
+  Builder->CreateStore(StartVal, Alloca);
+
   BasicBlock *PreheaderBB = Builder->GetInsertBlock();
   BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "loop", TheFunction);
   Builder->CreateBr(LoopBB);
@@ -694,6 +709,12 @@ Value *ForExprAST::codegen() {
   Value *EndCond = End->codegen();
   if (!EndCond)
     return nullptr;
+
+  // Reload, increment, and restore the alloca, This handles the case where
+  // the body og the loop mutates the variable.
+  Value *CurVar = Builder->CreateLoad(Alloca->getAllocatedType(), Alloca, VarName.c_str());
+  Value *NextVar = Builder->CreateFAdd(CurVar, StepVal, "nextvar");
+  Builder->CreateStore(NextVar, Alloca);
   // Convert condition to a bool by comparing non-equal to 0.0.
   EndCond = Builder->CreateFCmpONE(
     EndCond, ConstantFP::get(*TheContext, APFloat(0.0)), "loopcond");
@@ -740,7 +761,12 @@ Function *FunctionAST::codegen() {
 
   NamedValues.clear();
   for (auto &Arg : TheFunction->args())
-    NamedValues[std::string(Arg.getName())] = &Arg;
+    // Create an alloca for this variable.
+    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
+    // Store the initial value into the alloca.
+    Builder->CreateStore(&Arg, Alloca);
+    // Add arguments to variable symbol table.
+    NamedValues[std::string(Arg.getName())] = Alloca;
 
   if (Value *RetVal = Body->codegen()) {
     Builder->CreateRet(RetVal);
@@ -772,6 +798,8 @@ void InitializeModuleAndManagers() {
   TheSI = std::make_unique<StandardInstrumentations>(*TheContext, true);
 
   TheSI->registerCallbacks(*ThePIC, TheMAM.get());
+
+  TheFPM->addPass(PromotePass());
 
   TheFPM->addPass(InstCombinePass());
   TheFPM->addPass(ReassociatePass());
