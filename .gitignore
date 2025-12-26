@@ -9,3 +9,6 @@
 // Ignore the compiled binary for
 toy
 toy.dSYM/
+
+main
+output.o
