@@ -884,11 +884,10 @@ Function *FunctionAST::codegen() {
     Builder->CreateRet(RetVal);
     verifyFunction(*TheFunction);
     return TheFunction;
-
-    TheFunction->eraseFromParent();
-    return nullptr;
   }
   TheFunction->eraseFromParent();
+  if (P.isBinaryOp())
+    BinopPrecedence.erase(P.getOperatorName());
   return nullptr;
 }
 //===
@@ -929,9 +928,6 @@ static void HandleDefinition() {
       fprintf(stderr, "Read function definition:");
       FnIR->print(errs());
       fprintf(stderr, "\n");
-      ExitOnErr(TheJIT->addModule(
-        ThreadSafeModule(std::move(TheModule), std::move(TheContext))));
-      InitializeModuleAndManagers();
     }
     else {
       getNextToken();
