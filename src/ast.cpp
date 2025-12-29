@@ -7,6 +7,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Type.h"
 
 #include "llvm/ADT/APFloat.h"
 
@@ -86,12 +87,16 @@ Value *BinaryExprAST::codegen() {
     Value *Val = RHS->codegen();
     if (!Val)
       return nullptr;
+
+    // Look up the name.
     Value *Variable = NamedValues[LHSE->getName()];
     if (!Variable)
       return LogErrorV("Unknown variable name");
+
     Builder->CreateStore(Val, Variable);
     return Val;
   }
+
   Value *L = LHS->codegen();
   Value *R = RHS->codegen();
   if (!L || !R)
@@ -108,14 +113,14 @@ Value *BinaryExprAST::codegen() {
     L = Builder->CreateFCmpULT(L, R, "cmptmp");
     // Convert bool 0/1 to double 0.0 or 1.0
     return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
-
   default:
     break;
   }
 
   Function *F = getFunction(std::string("binary") + Op);
   assert(F && "binary operator not found!");
-  Value *Ops[2] = {L, R};
+
+  Value *Ops[] = {L, R};
   return Builder->CreateCall(F, Ops, "binop");
 }
 
