@@ -5,6 +5,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Function.h"
 
 #include "llvm/ADT/APFloat.h"
 
