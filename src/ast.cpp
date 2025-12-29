@@ -6,6 +6,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 
+#include "llvm/ADT/APFloat.h"
+
 #include <map>
 
 using namespace llvm;
